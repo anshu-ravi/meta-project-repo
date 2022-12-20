@@ -1,0 +1,243 @@
+---
+title: "T&F Group Project 2"
+author: "Anshu"
+date: "12/1/2021"
+output: html_document
+---
+
+Source - Kaggle 
+
+# Loading the libraries
+```{r}
+library(fpp3)
+library(tidyverse)
+library(Rcpp)
+```
+
+
+# Loading the dataset 
+```{r}
+data <- read.csv("energydata_complete.csv")
+data <- data %>% select(date, Appliances, lights) %>% mutate(date = as_datetime(date)) %>% as_tsibble(index=date)
+
+# Checking for Missing Values 
+colSums(is.na(data))
+```
+
+
+# Converting 10 minute data to hourly and daily data and creating graphs for them
+```{r}
+
+energy <- data %>% as_tibble()
+energy_hourly <- energy %>% 
+  mutate(date = floor_date(date, unit = "hours")) %>% 
+  group_by(date) %>% 
+  summarise(avg_hourly_Appliances = mean(Appliances), avg_hourly_lights = mean(lights))
+
+energy_daily <- energy %>% 
+  mutate(date = floor_date(date, unit = "days")) %>% 
+  group_by(date) %>% 
+  summarise(avg_daily_Appliances = mean(Appliances), avg_daily_lights = mean(lights))
+
+
+# Plotting hourly data 
+ggplot(energy_hourly, aes(x = date, y = avg_hourly_Appliances)) +
+  geom_line()
+
+ggplot(energy_hourly, aes(x = date, y = avg_hourly_lights)) +
+  geom_line()
+
+# Plotting daily data 
+ggplot(energy_daily, aes(x = date, y = avg_daily_Appliances)) +
+  geom_point() +
+  geom_line()
+
+ggplot(energy_daily, aes(x = date, y = avg_daily_lights)) +
+  geom_point() +
+  geom_line()
+```
+
+
+# Converting the data back to a time series 
+```{r}
+energy_hourly_ts <- energy_hourly %>% as_tsibble(index = date) 
+energy_daily_ts <- energy_daily %>% mutate(date = as_date(date)) %>% as_tsibble(index = date)
+```
+
+## GG Season Plots
+```{r}
+gg_season(energy_daily_ts %>% select(avg_daily_lights), period = "month")
+gg_season(energy_daily_ts %>% select(avg_daily_Appliances), period = "month")
+```
+
+
+```{r}
+gg_season(energy_daily_ts %>% select(avg_daily_lights))
+gg_season(energy_daily_ts %>% select(avg_daily_Appliances))
+```
+
+
+```{r}
+gg_season(energy_hourly_ts %>% select(avg_hourly_lights), period = "month")
+gg_season(energy_hourly_ts %>% select(avg_hourly_Appliances), period = "month")
+```
+
+
+```{r}
+gg_season(energy_hourly_ts %>% select(avg_hourly_lights))
+gg_season(energy_hourly_ts %>% select(avg_hourly_Appliances))
+```
+
+
+# Decomposition 
+```{r}
+energy_hourly_ts %>% 
+  model(classical_decomposition(avg_hourly_Appliances, type="multiplicative")) %>% 
+  components() %>% autoplot()
+
+energy_hourly_ts %>% 
+  model(classical_decomposition(avg_hourly_lights, type="multiplicative")) %>% 
+  components() %>% autoplot()
+
+energy_daily_ts %>% 
+  model(classical_decomposition(avg_daily_Appliances, type="multiplicative")) %>% 
+  components() %>% autoplot()
+
+energy_daily_ts %>% 
+  model(classical_decomposition(avg_daily_lights, type="multiplicative")) %>% 
+  components() %>% autoplot()
+```
+
+
+
+```{r}
+energy_hourly_ts %>% 
+  model(classical_decomposition(avg_hourly_Appliances, type="additive")) %>% 
+  components() %>% autoplot()
+
+energy_hourly_ts %>% 
+  model(classical_decomposition(avg_hourly_lights, type="additive")) %>% 
+  components() %>% autoplot()
+
+energy_daily_ts %>% 
+  model(classical_decomposition(avg_daily_Appliances, type="additive")) %>% 
+  components() %>% autoplot()
+
+energy_daily_ts %>% 
+  model(classical_decomposition(avg_daily_lights, type="additive")) %>% 
+  components() %>% autoplot()
+```
+
+
+# Basic Models + Benchmarks 
+```{r}
+data_train <- energy_daily_ts[1:128, ]
+
+data_fit1 <- data_train %>%
+  model(
+    Mean = MEAN(avg_daily_Appliances),
+    Naive = NAIVE(avg_daily_Appliances),
+    Seasonal_naive = SNAIVE(avg_daily_Appliances),
+    Drift = RW(avg_daily_Appliances ~ drift()), 
+    TSLM = TSLM(avg_daily_Appliances ~ trend())
+  )
+
+data_forecast<- data_fit1 %>% forecast(h=10)
+
+
+data_forecast %>%
+  autoplot(
+    energy_daily_ts
+  ) +
+  labs(
+    y = "Mean Daily Appliances",
+    title = "Forecast for the Mean Daily Appliances using Basic Models"
+  ) +
+  guides(colour = guide_legend(title = "Forecast"))
+
+
+accuracy(data_forecast, energy_daily_ts)
+```
+
+# ETS Models 
+```{r}
+data_fit2 <- data_train %>%
+  model(
+    ETS_ANN = ETS(avg_daily_Appliances ~ error("A") + trend("N") + season("N")), 
+    Holt = ETS(avg_daily_Appliances ~ error("A") + trend("A") + season("N")),
+    Damped_Holt_method = ETS(avg_daily_Appliances ~ error("A") + trend("Ad") + season("N")), 
+    additive = ETS(avg_daily_Appliances ~ error("A") + trend("A") + season("A")),
+    multiplicative = ETS(avg_daily_Appliances ~ error("M") + trend("A") + season("M")), 
+    HW = ETS(avg_daily_Appliances ~ error("M") + trend("Ad") + season("M"))
+)
+
+data_forecast2<- data_fit2 %>% forecast(h=10)
+
+data_forecast2 %>%
+  autoplot(
+    energy_daily_ts
+  ) +
+  labs(
+    y = "Mean Daily Appliances",
+    title = "Forecast for the Mean Daily Appliances using ETS Models"
+  ) +
+  guides(colour = guide_legend(title = "Forecast"))
+
+accuracy(data_forecast2, energy_daily_ts)
+```
+
+Based on this we can conclude that all the ETS models are doing much better than the basic models that we saw before. Among the ETS models, if we use the MAE value to select the best model, we find that the Damped Holt Method (A, Ad, N) is the best one. 
+
+
+```{r}
+
+data_fit2 %>% select(Damped_Holt_method) %>% forecast(h=10) %>%
+  autoplot(
+    energy_daily_ts
+  ) +
+  labs(
+    y = "Mean Daily Appliances",
+    title = "Forecast for the Mean Daily Appliances using ETS Models"
+  ) +
+  guides(colour = guide_legend(title = "Forecast"))
+
+```
+
+
+```{r}
+
+data_train %>%
+  model(
+    Damped_Holt_method = ETS(avg_daily_Appliances ~ error("A") + trend("Ad") + season("N"))
+) %>% gg_tsresiduals() + labs(title = "Residuals plot for the Damped Holt model")
+
+```
+
+```{r}
+
+energy_daily_ts %>% stretch_tsibble(.init=4) %>% 
+  model(
+    ETS_ANN = ETS(avg_daily_Appliances ~ error("A") + trend("N") + season("N")), 
+    Holt = ETS(avg_daily_Appliances ~ error("A") + trend("A") + season("N")),
+    Damped_Holt_method = ETS(avg_daily_Appliances ~ error("A") + trend("Ad") + season("N")), 
+    additive = ETS(avg_daily_Appliances ~ error("A") + trend("A") + season("A")),
+    multiplicative = ETS(avg_daily_Appliances ~ error("M") + trend("A") + season("M")), 
+    HW = ETS(avg_daily_Appliances ~ error("M") + trend("Ad") + season("M"))
+) %>% 
+  forecast(h=1) %>% accuracy(energy_daily_ts)
+```
+
+Even with cross validation, we get very similar results as before for the ETS models and based on the MAE value we can once again conclude that the best one is the Damped Holt Method. 
+
+```{r}
+
+fit_final <- energy_daily_ts %>%
+  model(
+   Damped_Holt_method = ETS(avg_daily_Appliances ~ error("A") + trend("Ad") + season("N"))
+  )
+# Estimated parameters:
+tidy(fit_final)
+
+```
+
+
