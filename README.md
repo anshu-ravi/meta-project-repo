@@ -1,5 +1,5 @@
 # meta-project-repo
-A repository containing all the different projects I have worked on 
+A repository containing a few of the different projects I have worked on 
 - Book Recommender System: 
 - CERN collision Classification: 
 - Celestial Body Classification  
